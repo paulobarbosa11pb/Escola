@@ -22,11 +22,7 @@ import { Computer, Reservation, ComputerStatus, AdminUser } from './types';
 import { initialComputers } from './mockData';
 
 const ADMIN_USERS: AdminUser[] = [
-  { id: 'ADM-01', name: 'Prof. Ricardo', role: 'Coordenador TIC' },
-  { id: 'ADM-02', name: 'Prof. Ana', role: 'Direção' },
-  { id: 'ADM-03', name: 'Sr. Manuel', role: 'Assistente Técnico' },
-  { id: 'ADM-04', name: 'Prof. Sofia', role: 'Biblioteca' },
-  { id: 'ADM-05', name: 'Admin Geral', role: 'EscolaTech' },
+  { id: 'ADM-05', name: 'Paulo Barbosa', role: 'Admin Geral' },
 ];
 
 export default function App() {
@@ -173,12 +169,12 @@ export default function App() {
         <div 
           onClick={handleLogoClick}
           className="flex items-center gap-3 mb-10 cursor-pointer select-none active:scale-95 transition-transform"
-          title="EscolaTech"
+          title="Pólo Sever"
         >
           <div className="bg-blue-600 p-2 rounded-lg">
             <Laptop className="text-white w-6 h-6" />
           </div>
-          <h1 className="font-bold text-xl tracking-tight">EscolaTech</h1>
+          <h1 className="font-bold text-xl tracking-tight">Pólo Sever</h1>
         </div>
 
         <div className="space-y-2 flex-1">
