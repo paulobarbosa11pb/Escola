@@ -1,5 +1,5 @@
 {
   "name": "Pólo Sever do Vouga",
   "description": "PWA profissional para o Pólo Sever do Vouga.",
-  "requestFramePermissions": []
+  "requestFramePermissions": ["camera"]
 }

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Laptop, 
   Calendar, 
@@ -15,11 +15,70 @@ import {
   User,
   RotateCcw,
   ShieldCheck,
-  ShieldAlert
+  ShieldAlert,
+  QrCode
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { Html5QrcodeScanner } from 'html5-qrcode';
 import { Computer, Reservation, ComputerStatus, AdminUser } from './types';
 import { initialComputers } from './mockData';
+
+// QR Scanner Component
+const QrScanner = ({ onScan, onClose }: { onScan: (data: string) => void, onClose: () => void }) => {
+  useEffect(() => {
+    const scanner = new Html5QrcodeScanner(
+      "reader",
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      /* verbose= */ false
+    );
+
+    scanner.render(
+      (decodedText) => {
+        onScan(decodedText);
+        scanner.clear().catch(err => console.error("Failed to clear scanner", err));
+      },
+      (error) => {
+        // console.warn(error);
+      }
+    );
+
+    return () => {
+      scanner.clear().catch(error => console.error("Failed to clear scanner", error));
+    };
+  }, [onScan]);
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <motion.div 
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-slate-900/80 backdrop-blur-md"
+      />
+      <motion.div 
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        className="relative bg-white rounded-3xl p-6 w-full max-w-sm shadow-2xl"
+      >
+        <div className="flex justify-between items-center mb-4">
+          <h4 className="font-bold text-slate-800 flex items-center gap-2">
+            <QrCode className="text-blue-600" size={20} />
+            Digitalizar QR Code
+          </h4>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X size={20} />
+          </button>
+        </div>
+        <div id="reader" className="overflow-hidden rounded-xl border-2 border-slate-100"></div>
+        <p className="mt-4 text-xs text-slate-500 text-center">
+          Aponte a câmara para o código QR do equipamento ou da requisição.
+        </p>
+      </motion.div>
+    </div>
+  );
+};
 
 const ADMIN_USERS: AdminUser[] = [
   { id: 'ADM-05', name: 'Paulo Barbosa', role: 'Admin Geral' },
@@ -28,8 +87,9 @@ const ADMIN_USERS: AdminUser[] = [
 export default function App() {
   const [computers, setComputers] = useState<Computer[]>(initialComputers);
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [activeTab, setActiveTab] = useState<'inventory' | 'reservations'>('inventory');
+  const [activeTab, setActiveTab] = useState<'inventory' | 'reservations' | 'settings'>('inventory');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedAdminId, setSelectedAdminId] = useState(ADMIN_USERS[0].id);
@@ -139,6 +199,33 @@ export default function App() {
     });
   };
 
+  const handleQrScan = (data: string) => {
+    try {
+      // Try to parse JSON if QR contains multiple fields
+      const parsed = JSON.parse(data);
+      setFormData({
+        ...formData,
+        ...parsed
+      });
+    } catch (e) {
+      // If not JSON, check if it's a number (numComputadores)
+      const num = parseInt(data);
+      if (!isNaN(num)) {
+        setFormData({
+          ...formData,
+          numComputadores: Math.min(num, stats.available)
+        });
+      } else {
+        // Otherwise, maybe it's a team name or location
+        setFormData({
+          ...formData,
+          equipa: data
+        });
+      }
+    }
+    setIsQrScannerOpen(false);
+  };
+
   const handleReturn = (reservationId: string) => {
     const reservation = reservations.find(r => r.id === reservationId);
     if (!reservation || reservation.status !== 'Ativa') return;
@@ -244,7 +331,10 @@ export default function App() {
             </motion.div>
           )}
           
-          <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 hover:bg-slate-50 transition-all">
+          <button 
+            onClick={() => setActiveTab('settings')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'settings' ? 'bg-blue-50 text-blue-600 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}
+          >
             <Settings size={20} />
             Definições
           </button>
@@ -256,9 +346,15 @@ export default function App() {
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
             <h2 className="text-2xl font-bold text-slate-800">
-              {activeTab === 'inventory' ? 'Gestão de Inventário' : 'Histórico de Requisições'}
+              {activeTab === 'inventory' && 'Gestão de Inventário'}
+              {activeTab === 'reservations' && 'Histórico de Requisições'}
+              {activeTab === 'settings' && 'Definições do Sistema'}
             </h2>
-            <p className="text-slate-500">Bem-vindo ao sistema de gestão escolar.</p>
+            <p className="text-slate-500">
+              {activeTab === 'inventory' && 'Bem-vindo ao sistema de gestão escolar.'}
+              {activeTab === 'reservations' && 'Consulte o histórico de todas as requisições efetuadas.'}
+              {activeTab === 'settings' && 'Configure as preferências do sistema.'}
+            </p>
           </div>
           
           <div className="flex items-center gap-3">
@@ -425,7 +521,69 @@ export default function App() {
             </div>
           </div>
         )}
+        {activeTab === 'settings' && (
+          <div className="max-w-2xl space-y-6">
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <ShieldCheck className="text-blue-600" size={20} />
+                Segurança e Acesso
+              </h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
+                  <div>
+                    <p className="font-bold text-slate-700">Modo Administrador</p>
+                    <p className="text-xs text-slate-500">Permite a devolução de equipamentos e gestão avançada.</p>
+                  </div>
+                  <button 
+                    onClick={() => setIsAdmin(!isAdmin)}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${isAdmin ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600'}`}
+                  >
+                    {isAdmin ? 'Ativado' : 'Desativado'}
+                  </button>
+                </div>
+                
+                <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
+                  <p className="text-sm font-bold text-blue-800 mb-1">Dica de Acesso</p>
+                  <p className="text-xs text-blue-600">
+                    Para ativar o menu de administrador, clique 5 vezes no logótipo "Pólo Sever" na barra lateral.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <Laptop className="text-blue-600" size={20} />
+                Sobre o Sistema
+              </h3>
+              <div className="space-y-3 text-sm text-slate-600">
+                <div className="flex justify-between py-2 border-b border-slate-50">
+                  <span>Versão</span>
+                  <span className="font-mono font-bold">v1.2.0</span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-slate-50">
+                  <span>Localização</span>
+                  <span className="font-bold">Pólo Sever do Vouga</span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-slate-50">
+                  <span>Total de Equipamentos</span>
+                  <span className="font-bold">{stats.total}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
+
+      {/* QR Scanner Modal */}
+      <AnimatePresence>
+        {isQrScannerOpen && (
+          <QrScanner 
+            onScan={handleQrScan} 
+            onClose={() => setIsQrScannerOpen(false)} 
+          />
+        )}
+      </AnimatePresence>
 
       {/* Reservation Modal */}
       <AnimatePresence>
@@ -445,7 +603,17 @@ export default function App() {
               className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden"
             >
               <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                <h3 className="text-xl font-bold text-slate-800">Nova Requisição</h3>
+                <div className="flex items-center gap-3">
+                  <h3 className="text-xl font-bold text-slate-800">Nova Requisição</h3>
+                  <button 
+                    type="button"
+                    onClick={() => setIsQrScannerOpen(true)}
+                    className="p-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-blue-50 hover:text-blue-600 transition-all"
+                    title="Digitalizar QR Code"
+                  >
+                    <QrCode size={20} />
+                  </button>
+                </div>
                 <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-slate-600">
                   <X size={24} />
                 </button>
