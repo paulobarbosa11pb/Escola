@@ -16,11 +16,13 @@ export interface AdminUser {
 
 export interface Reservation {
   id: string;
-  quantity: number;
-  teacherName: string;
-  startTime: string;
-  endTime: string;
-  room: string;
+  remetidaPor: string;
+  email: string;
+  dataNecessaria: string;
+  espacoTrabalho: string;
+  numComputadores: number;
+  equipa: string;
+  horarioUtilizacao: string;
   status: 'Ativa' | 'Concluída' | 'Cancelada';
   returnedBy?: string;
 }

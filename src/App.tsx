@@ -67,11 +67,13 @@ export default function App() {
 
   // Form state
   const [formData, setFormData] = useState({
-    teacherName: '',
-    startTime: '',
-    endTime: '',
-    room: '',
-    quantity: 1
+    remetidaPor: '',
+    email: '',
+    dataNecessaria: '',
+    espacoTrabalho: '',
+    numComputadores: 1,
+    equipa: '',
+    horarioUtilizacao: ''
   });
 
   const filteredComputers = useMemo(() => {
@@ -93,7 +95,7 @@ export default function App() {
 
   const handleReserve = (e: React.FormEvent) => {
     e.preventDefault();
-    const qty = Number(formData.quantity);
+    const qty = Number(formData.numComputadores);
     
     if (qty > stats.available) {
       alert(`Apenas ${stats.available} computadores disponíveis.`);
@@ -102,11 +104,13 @@ export default function App() {
 
     const newReservation: Reservation = {
       id: `RES-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
-      quantity: qty,
-      teacherName: formData.teacherName,
-      startTime: formData.startTime,
-      endTime: formData.endTime,
-      room: formData.room,
+      numComputadores: qty,
+      remetidaPor: formData.remetidaPor,
+      email: formData.email,
+      dataNecessaria: formData.dataNecessaria,
+      espacoTrabalho: formData.espacoTrabalho,
+      equipa: formData.equipa,
+      horarioUtilizacao: formData.horarioUtilizacao,
       status: 'Ativa'
     };
 
@@ -124,14 +128,22 @@ export default function App() {
     setComputers(updatedComputers);
     
     setIsModalOpen(false);
-    setFormData({ teacherName: '', startTime: '', endTime: '', room: '', quantity: 1 });
+    setFormData({ 
+      remetidaPor: '', 
+      email: '', 
+      dataNecessaria: '', 
+      espacoTrabalho: '', 
+      numComputadores: 1, 
+      equipa: '', 
+      horarioUtilizacao: '' 
+    });
   };
 
   const handleReturn = (reservationId: string) => {
     const reservation = reservations.find(r => r.id === reservationId);
     if (!reservation || reservation.status !== 'Ativa') return;
 
-    const qty = reservation.quantity;
+    const qty = reservation.numComputadores;
 
     // Update reservation status and track who returned it
     setReservations(prev => prev.map(r => 
@@ -319,82 +331,98 @@ export default function App() {
 
         {activeTab === 'reservations' && (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50 border-bottom border-slate-200">
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">ID Reserva</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">Quantidade</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">Professor</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">Horário</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">Sala</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600">Estado</th>
-                  <th className="px-6 py-4 text-sm font-semibold text-slate-600 text-right">Ações</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {reservations.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-10 text-center text-slate-400">
-                      Nenhuma requisição registada.
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[1000px]">
+                <thead>
+                  <tr className="bg-slate-50 border-bottom border-slate-200">
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">ID Reserva</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Remetida por</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Necessária para</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Espaço</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">PCs</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Equipa</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Horário</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Estado</th>
+                    <th className="px-6 py-4 text-sm font-semibold text-slate-600 text-right">Ações</th>
                   </tr>
-                ) : (
-                  reservations.map((res) => (
-                    <tr key={res.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-6 py-4">
-                        <div className="font-mono text-xs text-slate-500">{res.id}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2 font-bold text-blue-600">
-                          <Laptop size={14} />
-                          {res.quantity} PCs
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2 text-slate-600">
-                          <User size={14} />
-                          {res.teacherName}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-slate-600">
-                          {res.startTime} - {res.endTime}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-slate-600">{res.room}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex flex-col gap-1">
-                          <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider w-fit ${
-                            res.status === 'Ativa' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
-                          }`}>
-                            {res.status}
-                          </span>
-                          {res.returnedBy && (
-                            <span className="text-[9px] text-emerald-600 font-medium flex items-center gap-1">
-                              <ShieldCheck size={10} />
-                              Por: {res.returnedBy}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        {isAdmin && res.status === 'Ativa' && (
-                          <button 
-                            onClick={() => handleReturn(res.id)}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors text-xs font-bold"
-                          >
-                            <RotateCcw size={14} />
-                            Devolver
-                          </button>
-                        )}
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {reservations.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="px-6 py-10 text-center text-slate-400">
+                        Nenhuma requisição registada.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    reservations.map((res) => (
+                      <tr key={res.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="font-mono text-xs text-slate-500">{res.id}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-2 text-slate-800 font-medium">
+                              <User size={14} />
+                              {res.remetidaPor}
+                            </div>
+                            <div className="text-[10px] text-slate-400 ml-5">{res.email}</div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2 text-slate-600 text-sm">
+                            <Calendar size={14} />
+                            {res.dataNecessaria}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-slate-600">{res.espacoTrabalho}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2 font-bold text-blue-600">
+                            <Laptop size={14} />
+                            {res.numComputadores}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-slate-600">{res.equipa}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-slate-600 font-medium">
+                            {res.horarioUtilizacao}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col gap-1">
+                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider w-fit ${
+                              res.status === 'Ativa' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
+                            }`}>
+                              {res.status}
+                            </span>
+                            {res.returnedBy && (
+                              <span className="text-[9px] text-emerald-600 font-medium flex items-center gap-1">
+                                <ShieldCheck size={10} />
+                                Por: {res.returnedBy}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          {isAdmin && res.status === 'Ativa' && (
+                            <button 
+                              onClick={() => handleReturn(res.id)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors text-xs font-bold"
+                            >
+                              <RotateCcw size={14} />
+                              Devolver
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </main>
@@ -423,77 +451,102 @@ export default function App() {
                 </button>
               </div>
 
-              <form onSubmit={handleReserve} className="p-6 space-y-4">
+              <form onSubmit={handleReserve} className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
                 <div className="bg-blue-50 p-4 rounded-2xl mb-4">
                   <p className="text-xs text-blue-600 font-bold uppercase tracking-wider mb-1">Disponibilidade Atual</p>
                   <p className="font-bold text-slate-800">{stats.available} computadores livres</p>
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-700">Quantidade de Computadores</label>
-                  <input 
-                    required
-                    type="number" 
-                    min="1"
-                    max={stats.available}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    value={formData.quantity}
-                    onChange={e => setFormData({...formData, quantity: parseInt(e.target.value) || 0})}
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-700">Nome do Professor</label>
+                  <label className="text-sm font-medium text-slate-700">Remetida por</label>
                   <input 
                     required
                     type="text" 
                     className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    placeholder="Ex: Prof. João Silva"
-                    value={formData.teacherName}
-                    onChange={e => setFormData({...formData, teacherName: e.target.value})}
+                    placeholder="Seu nome completo"
+                    value={formData.remetidaPor}
+                    onChange={e => setFormData({...formData, remetidaPor: e.target.value})}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-slate-700">Email</label>
+                  <input 
+                    required
+                    type="email" 
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    placeholder="seu@email.com"
+                    value={formData.email}
+                    onChange={e => setFormData({...formData, email: e.target.value})}
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-700">Hora Início</label>
+                    <label className="text-sm font-medium text-slate-700">Necessária para</label>
                     <input 
                       required
-                      type="time" 
+                      type="date" 
                       className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      value={formData.startTime}
-                      onChange={e => setFormData({...formData, startTime: e.target.value})}
+                      value={formData.dataNecessaria}
+                      onChange={e => setFormData({...formData, dataNecessaria: e.target.value})}
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-sm font-medium text-slate-700">Hora Fim</label>
+                    <label className="text-sm font-medium text-slate-700">Nº de Computadores</label>
                     <input 
                       required
-                      type="time" 
+                      type="number" 
+                      min="1"
+                      max={stats.available}
                       className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      value={formData.endTime}
-                      onChange={e => setFormData({...formData, endTime: e.target.value})}
+                      value={formData.numComputadores}
+                      onChange={e => setFormData({...formData, numComputadores: parseInt(e.target.value) || 0})}
                     />
                   </div>
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-slate-700">Sala / Local</label>
+                  <label className="text-sm font-medium text-slate-700">Espaço de trabalho</label>
                   <input 
                     required
                     type="text" 
                     className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     placeholder="Ex: Sala 12 ou Auditório"
-                    value={formData.room}
-                    onChange={e => setFormData({...formData, room: e.target.value})}
+                    value={formData.espacoTrabalho}
+                    onChange={e => setFormData({...formData, espacoTrabalho: e.target.value})}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-slate-700">Equipa</label>
+                  <input 
+                    required
+                    type="text" 
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    placeholder="Nome da equipa ou projeto"
+                    value={formData.equipa}
+                    onChange={e => setFormData({...formData, equipa: e.target.value})}
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-slate-700">Horário de utilização</label>
+                  <input 
+                    required
+                    type="text" 
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    placeholder="Ex: das 09:00 as 15:00"
+                    value={formData.horarioUtilizacao}
+                    onChange={e => setFormData({...formData, horarioUtilizacao: e.target.value})}
                   />
                 </div>
 
                 <button 
                   type="submit"
-                  disabled={formData.quantity > stats.available || formData.quantity <= 0}
+                  disabled={formData.numComputadores > stats.available || formData.numComputadores <= 0}
                   className={`w-full py-3 rounded-xl font-bold transition-all shadow-lg mt-4 ${
-                    formData.quantity > stats.available || formData.quantity <= 0
+                    formData.numComputadores > stats.available || formData.numComputadores <= 0
                     ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none'
                     : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100'
                   }`}
