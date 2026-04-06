@@ -1,0 +1,51 @@
+{
+  "entities": {
+    "Computer": {
+      "title": "Computador",
+      "description": "Um computador individual no inventário do Pólo Sever.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID único do computador (ex: PC-001)" },
+        "name": { "type": "string", "description": "Nome do computador" },
+        "model": { "type": "string", "description": "Modelo do computador" },
+        "status": { "type": "string", "enum": ["Disponível", "Requisitado", "Manutenção"], "description": "Estado atual do computador" },
+        "location": { "type": "string", "description": "Localização física atual" },
+        "currentTeam": { "type": "string", "description": "Equipa que está a utilizar o computador no momento" }
+      },
+      "required": ["id", "name", "model", "status", "location"]
+    },
+    "Reservation": {
+      "title": "Reserva",
+      "description": "Uma requisição de computadores feita por um utilizador.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "ID único da reserva" },
+        "remetidaPor": { "type": "string", "description": "Nome de quem fez o pedido" },
+        "email": { "type": "string", "description": "Email de contacto" },
+        "dataNecessaria": { "type": "string", "description": "Data para a qual os computadores são necessários" },
+        "espacoTrabalho": { "type": "string", "description": "Onde os computadores serão usados" },
+        "numComputadores": { "type": "number", "description": "Quantidade de computadores solicitada" },
+        "equipa": { "type": "string", "description": "Equipa ou projeto associado" },
+        "horarioUtilizacao": { "type": "string", "description": "Horário previsto de uso" },
+        "status": { "type": "string", "enum": ["Pendente", "Ativa", "Concluída", "Cancelada", "Rejeitada"], "description": "Estado da reserva" },
+        "returnedBy": { "type": "string", "description": "Quem processou a devolução" },
+        "returnedAt": { "type": "string", "description": "Data e hora da devolução" },
+        "processedBy": { "type": "string", "description": "Administrador que aprovou/rejeitou" },
+        "pickupLocation": { "type": "string", "description": "Local onde os computadores devem ser levantados" },
+        "rejectionReason": { "type": "string", "description": "Motivo caso a reserva seja rejeitada" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Data de criação do pedido" }
+      },
+      "required": ["id", "remetidaPor", "email", "dataNecessaria", "espacoTrabalho", "numComputadores", "equipa", "horarioUtilizacao", "status"]
+    }
+  },
+  "firestore": {
+    "/computers/{computerId}": {
+      "schema": { "$ref": "Computer" },
+      "description": "Coleção de computadores do inventário."
+    },
+    "/reservations/{reservationId}": {
+      "schema": { "$ref": "Reservation" },
+      "description": "Coleção de todas as requisições feitas."
+    }
+  }
+}

@@ -22,12 +22,45 @@ import {
   Info,
   ThumbsUp,
   ThumbsDown,
-  Download
+  Download,
+  BarChart3,
+  TrendingUp,
+  PieChart as PieChartIcon,
+  Database
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
+import { 
+  collection, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  doc, 
+  query, 
+  orderBy, 
+  serverTimestamp, 
+  setDoc,
+  getDocs,
+  writeBatch
+} from 'firebase/firestore';
+import { 
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer, 
+  PieChart, 
+  Pie, 
+  Cell,
+  LineChart,
+  Line,
+  Legend
+} from 'recharts';
 import { Computer, Reservation, ComputerStatus, AdminUser } from './types';
 import { initialComputers } from './mockData';
+import { db, handleFirestoreError, OperationType } from './firebase';
 
 // QR Scanner Component
 const QrScanner = ({ onScan, onClose }: { onScan: (data: string) => void, onClose: () => void }) => {
@@ -90,10 +123,139 @@ const ADMIN_USERS: AdminUser[] = [
   { id: 'ADM-05', name: 'Paulo Barbosa', role: 'Admin Geral' },
 ];
 
+const Dashboard = ({ computers, reservations }: { computers: Computer[], reservations: Reservation[] }) => {
+  const stats = {
+    total: computers.length,
+    available: computers.filter(c => c.status === 'Disponível').length,
+    borrowed: computers.filter(c => c.status === 'Requisitado').length,
+    maintenance: computers.filter(c => c.status === 'Manutenção').length,
+  };
+
+  const pieData = [
+    { name: 'Disponível', value: stats.available, color: '#10b981' },
+    { name: 'Requisitado', value: stats.borrowed, color: '#3b82f6' },
+    { name: 'Manutenção', value: stats.maintenance, color: '#f43f5e' },
+  ];
+
+  // Group reservations by team
+  const teamUsage = useMemo(() => {
+    const counts: Record<string, number> = {};
+    reservations.forEach(res => {
+      if (res.status === 'Ativa' || res.status === 'Concluída') {
+        counts[res.equipa] = (counts[res.equipa] || 0) + res.numComputadores;
+      }
+    });
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+  }, [reservations]);
+
+  // Last 7 days activity (mocked for visualization if no timestamps)
+  const activityData = [
+    { day: 'Seg', reqs: 12 },
+    { day: 'Ter', reqs: 19 },
+    { day: 'Qua', reqs: 15 },
+    { day: 'Qui', reqs: 22 },
+    { day: 'Sex', reqs: 30 },
+    { day: 'Sáb', reqs: 8 },
+    { day: 'Dom', reqs: 5 },
+  ];
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="space-y-6"
+    >
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Dashboard de Performance</h2>
+          <p className="text-slate-500">Análise em tempo real da utilização de recursos.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Status Distribution */}
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+            <PieChartIcon size={16} className="text-blue-600" />
+            Distribuição de Inventário
+          </h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={80}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {pieData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
+                  ))}
+                </Pie>
+                <Tooltip />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Team Usage */}
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm lg:col-span-2">
+          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+            <BarChart3 size={16} className="text-blue-600" />
+            Top 5 Equipas (Computadores Requisitados)
+          </h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={teamUsage}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
+                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
+                <Tooltip 
+                  cursor={{fill: '#f8fafc'}}
+                  contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                />
+                <Bar dataKey="value" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Weekly Activity */}
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm lg:col-span-3">
+          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-6 flex items-center gap-2">
+            <TrendingUp size={16} className="text-blue-600" />
+            Atividade Semanal (Novas Requisições)
+          </h3>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={activityData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
+                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748b', fontSize: 12}} />
+                <Tooltip 
+                  contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
+                />
+                <Line type="monotone" dataKey="reqs" stroke="#3b82f6" strokeWidth={3} dot={{r: 6, fill: '#3b82f6', strokeWidth: 2, stroke: '#fff'}} activeDot={{r: 8}} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
 export default function App() {
-  const [computers, setComputers] = useState<Computer[]>(initialComputers);
+  const [computers, setComputers] = useState<Computer[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [activeTab, setActiveTab] = useState<'inventory' | 'reservations' | 'settings'>('inventory');
+  const [activeTab, setActiveTab] = useState<'inventory' | 'reservations' | 'dashboard' | 'settings'>('inventory');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
   const [notifications, setNotifications] = useState<{id: string, message: string, type: 'success' | 'info' | 'warning'}[]>([]);
@@ -113,7 +275,47 @@ export default function App() {
   const [expandedResId, setExpandedResId] = useState<string | null>(null);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [editingComputerId, setEditingComputerId] = useState<string | null>(null);
   const ADMIN_PASSWORD = 'admin123'; // Password para o Easter Egg
+
+  // Firebase Sync
+  useEffect(() => {
+    const qComputers = query(collection(db, 'computers'));
+    const unsubComputers = onSnapshot(qComputers, (snapshot) => {
+      const docs = snapshot.docs.map(doc => doc.data() as Computer);
+      setComputers(docs);
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'computers'));
+
+    const qReservations = query(collection(db, 'reservations'), orderBy('createdAt', 'desc'));
+    const unsubReservations = onSnapshot(qReservations, (snapshot) => {
+      const docs = snapshot.docs.map(doc => doc.data() as Reservation);
+      setReservations(docs);
+    }, (error) => handleFirestoreError(error, OperationType.GET, 'reservations'));
+
+    return () => {
+      unsubComputers();
+      unsubReservations();
+    };
+  }, []);
+
+  const seedDatabase = async () => {
+    if (isSeeding) return;
+    setIsSeeding(true);
+    try {
+      const batch = writeBatch(db);
+      initialComputers.forEach(pc => {
+        const docRef = doc(db, 'computers', pc.id);
+        batch.set(docRef, pc);
+      });
+      await batch.commit();
+      addNotification('Base de dados inicializada com sucesso!', 'success');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'computers');
+    } finally {
+      setIsSeeding(false);
+    }
+  };
 
   const handleLogoClick = () => {
     const newClicks = logoClicks + 1;
@@ -270,7 +472,7 @@ export default function App() {
     addNotification('Exportação concluída com sucesso!', 'success');
   };
 
-  const handleReserve = (e: React.FormEvent) => {
+  const handleReserve = async (e: React.FormEvent) => {
     e.preventDefault();
     const qty = Number(formData.numComputadores);
     
@@ -279,8 +481,9 @@ export default function App() {
       return;
     }
 
-    const newReservation: Reservation = {
-      id: `RES-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+    const resId = `RES-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
+    const newReservation: any = {
+      id: resId,
       numComputadores: qty,
       remetidaPor: formData.remetidaPor,
       email: formData.email,
@@ -288,81 +491,86 @@ export default function App() {
       espacoTrabalho: formData.espacoTrabalho,
       equipa: formData.equipa,
       horarioUtilizacao: formData.horarioUtilizacao,
-      status: 'Pendente'
+      status: 'Pendente',
+      createdAt: serverTimestamp()
     };
 
-    setReservations([newReservation, ...reservations]);
-    
-    setIsModalOpen(false);
-    addNotification(`Requisição enviada! Aguarde aprovação do administrador.`, 'info');
-    setFormData({ 
-      remetidaPor: '', 
-      email: '', 
-      dataNecessaria: '', 
-      espacoTrabalho: '', 
-      numComputadores: 1, 
-      equipa: '', 
-      horarioUtilizacao: '' 
-    });
+    try {
+      await setDoc(doc(db, 'reservations', resId), newReservation);
+      setIsModalOpen(false);
+      addNotification(`Requisição enviada! Aguarde aprovação do administrador.`, 'info');
+      setFormData({ 
+        remetidaPor: '', 
+        email: '', 
+        dataNecessaria: '', 
+        espacoTrabalho: '', 
+        numComputadores: 1, 
+        equipa: '', 
+        horarioUtilizacao: '' 
+      });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'reservations');
+    }
   };
 
-  const handleAccept = (e: React.FormEvent) => {
+  const handleAccept = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!acceptingResId) return;
 
-    const reservation = reservations.find(r => r.id === acceptingResId);
-    if (!reservation) return;
+    const res = reservations.find(r => r.id === acceptingResId);
+    if (!res) return;
 
-    const qty = reservation.numComputadores;
-    if (qty > stats.available) {
-      alert('Não há computadores suficientes disponíveis para aprovar esta requisição.');
-      return;
-    }
-
-    // Update reservation
-    setReservations(prev => prev.map(r => 
-      r.id === acceptingResId ? { 
-        ...r, 
-        status: 'Ativa' as const,
-        pickupLocation: pickupLocationInput,
-        processedBy: currentAdmin.name
-      } : r
-    ));
-
-    // Mark computers as borrowed
-    let count = 0;
-    setComputers(prev => prev.map(pc => {
-      if (pc.status === 'Disponível' && count < qty) {
-        count++;
-        return { 
-          ...pc, 
-          status: 'Requisitado' as ComputerStatus,
-          currentTeam: reservation.equipa 
-        };
+    try {
+      // Find available computers
+      const availablePCs = computers.filter(c => c.status === 'Disponível').slice(0, res.numComputadores);
+      
+      if (availablePCs.length < res.numComputadores) {
+        alert('Não há computadores suficientes disponíveis para aprovar esta requisição.');
+        return;
       }
-      return pc;
-    }));
 
-    addNotification(`Requisição ${acceptingResId} aprovada!`, 'success');
-    setAcceptingResId(null);
-    setPickupLocationInput('');
+      const batch = writeBatch(db);
+      
+      // Update computers
+      availablePCs.forEach(pc => {
+        batch.update(doc(db, 'computers', pc.id), {
+          status: 'Requisitado',
+          currentTeam: res.equipa
+        });
+      });
+
+      // Update reservation
+      batch.update(doc(db, 'reservations', acceptingResId), {
+        status: 'Ativa',
+        processedBy: currentAdmin.name,
+        pickupLocation: pickupLocationInput
+      });
+
+      await batch.commit();
+      setAcceptingResId(null);
+      setPickupLocationInput('');
+      addNotification(`Requisição ${acceptingResId} aprovada com sucesso!`, 'success');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'reservations');
+    }
   };
 
-  const handleReject = (e: React.FormEvent) => {
+  const handleReject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rejectingResId) return;
-
-    setReservations(prev => prev.map(r => 
-      r.id === rejectingResId ? { 
-        ...r, 
-        status: 'Rejeitada' as const,
+    
+    try {
+      await updateDoc(doc(db, 'reservations', rejectingResId), {
+        status: 'Rejeitada',
         processedBy: currentAdmin.name,
         rejectionReason: rejectionReasonInput
-      } : r
-    ));
-    addNotification(`Requisição ${rejectingResId} rejeitada.`, 'info');
-    setRejectingResId(null);
-    setRejectionReasonInput('');
+      });
+      setRejectingResId(null);
+      setRejectionReasonInput('');
+      addNotification(`Requisição ${rejectingResId} rejeitada.`, 'info');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'reservations');
+    }
   };
 
   const handleQrScan = (data: string) => {
@@ -392,37 +600,44 @@ export default function App() {
     setIsQrScannerOpen(false);
   };
 
-  const handleReturn = (reservationId: string) => {
-    const reservation = reservations.find(r => r.id === reservationId);
-    if (!reservation || reservation.status !== 'Ativa') return;
+  const handleReturn = async (reservationId: string) => {
+    const res = reservations.find(r => r.id === reservationId);
+    if (!res) return;
 
-    const qty = reservation.numComputadores;
+    try {
+      // Find computers associated with this team
+      const teamPCs = computers.filter(c => c.currentTeam === res.equipa && c.status === 'Requisitado');
+      
+      const batch = writeBatch(db);
+      
+      teamPCs.forEach(pc => {
+        batch.update(doc(db, 'computers', pc.id), {
+          status: 'Disponível',
+          currentTeam: null
+        });
+      });
 
-    // Update reservation status and track who returned it
-    setReservations(prev => prev.map(r => 
-      r.id === reservationId ? { 
-        ...r, 
-        status: 'Concluída' as const,
+      batch.update(doc(db, 'reservations', reservationId), {
+        status: 'Concluída',
         returnedBy: currentAdmin.name,
         returnedAt: new Date().toLocaleString('pt-PT')
-      } : r
-    ));
+      });
 
-    // Mark 'n' computers as available
-    let count = 0;
-    setComputers(prev => prev.map(pc => {
-      if (pc.status === 'Requisitado' && pc.currentTeam === reservation.equipa && count < qty) {
-        count++;
-        return { 
-          ...pc, 
-          status: 'Disponível' as ComputerStatus,
-          currentTeam: undefined 
-        };
-      }
-      return pc;
-    }));
+      await batch.commit();
+      addNotification(`Equipamentos da requisição ${reservationId} devolvidos.`, 'success');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'reservations');
+    }
+  };
 
-    addNotification(`${qty} computadores ficaram agora disponíveis!`, 'info');
+  const updateComputerStatus = async (pcId: string, newStatus: ComputerStatus) => {
+    try {
+      await updateDoc(doc(db, 'computers', pcId), { status: newStatus });
+      addNotification(`Estado do PC ${pcId} atualizado para ${newStatus}.`, 'info');
+      setEditingComputerId(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'computers');
+    }
   };
 
   const getStatusColor = (status: ComputerStatus) => {
@@ -454,7 +669,7 @@ export default function App() {
             onClick={() => setActiveTab('inventory')}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'inventory' ? 'bg-blue-50 text-blue-600 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}
           >
-            <LayoutDashboard size={20} />
+            <Laptop size={20} />
             Inventário
           </button>
           <button 
@@ -463,6 +678,13 @@ export default function App() {
           >
             <History size={20} />
             Requisições
+          </button>
+          <button 
+            onClick={() => setActiveTab('dashboard')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'dashboard' ? 'bg-blue-50 text-blue-600 font-medium' : 'text-slate-500 hover:bg-slate-50'}`}
+          >
+            <BarChart3 size={20} />
+            Dashboard
           </button>
         </div>
 
@@ -521,11 +743,13 @@ export default function App() {
             <h2 className="text-2xl font-bold text-slate-800">
               {activeTab === 'inventory' && 'Gestão de Inventário'}
               {activeTab === 'reservations' && 'Histórico de Requisições'}
+              {activeTab === 'dashboard' && 'Dashboard de Estatísticas'}
               {activeTab === 'settings' && 'Definições do Sistema'}
             </h2>
             <p className="text-slate-500">
               {activeTab === 'inventory' && 'Bem-vindo ao sistema de gestão escolar.'}
               {activeTab === 'reservations' && 'Consulte o histórico de todas as requisições efetuadas.'}
+              {activeTab === 'dashboard' && 'Visualize o desempenho e utilização dos recursos.'}
               {activeTab === 'settings' && 'Configure as preferências do sistema.'}
             </p>
           </div>
@@ -540,6 +764,10 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        {activeTab === 'dashboard' && (
+          <Dashboard computers={computers} reservations={reservations} />
+        )}
 
         {activeTab === 'inventory' && (
           <>
@@ -608,9 +836,21 @@ export default function App() {
                     className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group"
                   >
                     <div className="flex justify-between items-start mb-4">
-                      <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${getStatusColor(pc.status)}`}>
-                        {pc.status}
-                      </div>
+                      {isAdmin ? (
+                        <select 
+                          className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border focus:outline-none focus:ring-2 focus:ring-blue-500 ${getStatusColor(pc.status)}`}
+                          value={pc.status}
+                          onChange={(e) => updateComputerStatus(pc.id, e.target.value as ComputerStatus)}
+                        >
+                          <option value="Disponível">Disponível</option>
+                          <option value="Requisitado">Requisitado</option>
+                          <option value="Manutenção">Manutenção</option>
+                        </select>
+                      ) : (
+                        <div className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase border ${getStatusColor(pc.status)}`}>
+                          {pc.status}
+                        </div>
+                      )}
                       <span className="text-xs font-mono text-slate-400">{pc.id}</span>
                     </div>
 
@@ -940,6 +1180,29 @@ export default function App() {
                 Segurança e Acesso
               </h3>
               <div className="space-y-4">
+                {isAdmin && (
+                  <div className="p-4 bg-amber-50 rounded-xl border border-amber-100 mb-4">
+                    <h4 className="text-sm font-bold text-amber-800 mb-1 flex items-center gap-2">
+                      <Database size={16} />
+                      Base de Dados (Firebase)
+                    </h4>
+                    <p className="text-xs text-amber-600 mb-3">
+                      Se o inventário estiver vazio, pode inicializá-lo com os dados padrão.
+                    </p>
+                    <button 
+                      onClick={seedDatabase}
+                      disabled={isSeeding || computers.length > 0}
+                      className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                        computers.length > 0 
+                          ? 'bg-slate-100 text-slate-400 cursor-not-allowed' 
+                          : 'bg-amber-600 text-white hover:bg-amber-700'
+                      }`}
+                    >
+                      <Database size={14} />
+                      {isSeeding ? 'A inicializar...' : computers.length > 0 ? 'Inventário já Inicializado' : 'Inicializar Inventário'}
+                    </button>
+                  </div>
+                )}
                 <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
                   <div>
                     <p className="font-bold text-slate-700">Modo Administrador</p>

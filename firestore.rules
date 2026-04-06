@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: computers
+    // Document ID: PC-{number}
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - model: string (required)
+    //   - status: string (required, enum: ['Disponível', 'Requisitado', 'Manutenção'])
+    //   - location: string (required)
+    //   - currentTeam: string (optional)
+    //
+    // Collection: reservations
+    // Document ID: RES-{random}
+    // Fields:
+    //   - id: string (required)
+    //   - remetidaPor: string (required)
+    //   - email: string (required)
+    //   - dataNecessaria: string (required)
+    //   - espacoTrabalho: string (required)
+    //   - numComputadores: number (required)
+    //   - equipa: string (required)
+    //   - horarioUtilizacao: string (required)
+    //   - status: string (required, enum: ['Pendente', 'Ativa', 'Concluída', 'Cancelada', 'Rejeitada'])
+    //   - createdAt: timestamp (required)
+    //   - processedBy: string (optional)
+    //   - rejectionReason: string (optional)
+    //   - returnedBy: string (optional)
+    //   - returnedAt: string (optional)
+    //   - pickupLocation: string (optional)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "paulobarbosa11.PB@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidComputer(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() < 20 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.model is string && data.model.size() > 0 && data.model.size() < 100 &&
+             data.status in ['Disponível', 'Requisitado', 'Manutenção'] &&
+             data.location is string && data.location.size() > 0 && data.location.size() < 100 &&
+             (!('currentTeam' in data) || (data.currentTeam is string && data.currentTeam.size() < 100));
+    }
+
+    function isValidReservation(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() < 50 &&
+             data.remetidaPor is string && data.remetidaPor.size() > 0 && data.remetidaPor.size() < 100 &&
+             data.email is string && isValidEmail(data.email) &&
+             data.dataNecessaria is string &&
+             data.espacoTrabalho is string && data.espacoTrabalho.size() > 0 && data.espacoTrabalho.size() < 100 &&
+             data.numComputadores is number && data.numComputadores > 0 &&
+             data.equipa is string && data.equipa.size() > 0 && data.equipa.size() < 100 &&
+             data.horarioUtilizacao is string && data.horarioUtilizacao.size() > 0 && data.horarioUtilizacao.size() < 100 &&
+             data.status in ['Pendente', 'Ativa', 'Concluída', 'Cancelada', 'Rejeitada'] &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    match /computers/{computerId} {
+      allow read: if true; // Publicly readable inventory
+      allow create: if isAdmin() && isValidComputer(request.resource.data);
+      allow update: if isAdmin() && isValidComputer(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /reservations/{reservationId} {
+      allow read: if true; // Publicly readable for transparency, or restrict to owner/admin
+      allow create: if isAuthenticated() && isValidReservation(request.resource.data) && request.resource.data.status == 'Pendente';
+      allow update: if (isAdmin() && isValidReservation(request.resource.data)) || 
+                      (isAuthenticated() && request.auth.token.email == resource.data.email && request.resource.data.status == 'Cancelada' && resource.data.status == 'Pendente');
+      allow delete: if isAdmin();
+    }
+  }
+}
