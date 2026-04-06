@@ -13,10 +13,16 @@ import {
   X,
   MapPin,
   User,
+  Users,
   RotateCcw,
   ShieldCheck,
   ShieldAlert,
-  QrCode
+  QrCode,
+  Bell,
+  Info,
+  ThumbsUp,
+  ThumbsDown,
+  Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
@@ -90,11 +96,21 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'inventory' | 'reservations' | 'settings'>('inventory');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
+  const [notifications, setNotifications] = useState<{id: string, message: string, type: 'success' | 'info' | 'warning'}[]>([]);
+  const [acceptingResId, setAcceptingResId] = useState<string | null>(null);
+  const [rejectingResId, setRejectingResId] = useState<string | null>(null);
+  const [pickupLocationInput, setPickupLocationInput] = useState('');
+  const [rejectionReasonInput, setRejectionReasonInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<ComputerStatus | 'Todos'>('Todos');
+  const [teamFilter, setTeamFilter] = useState<string>('Todos');
+  const [reservationStatusFilter, setReservationStatusFilter] = useState<Reservation['status'] | 'Todos'>('Todos');
   const [isAdmin, setIsAdmin] = useState(false);
   const [selectedAdminId, setSelectedAdminId] = useState(ADMIN_USERS[0].id);
   const [logoClicks, setLogoClicks] = useState(0);
   const [showAdminToggle, setShowAdminToggle] = useState(false);
+  const [lastPendingCount, setLastPendingCount] = useState(0);
+  const [expandedResId, setExpandedResId] = useState<string | null>(null);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
   const ADMIN_PASSWORD = 'admin123'; // Password para o Easter Egg
@@ -112,6 +128,7 @@ export default function App() {
     e.preventDefault();
     if (passwordInput === ADMIN_PASSWORD) {
       setShowAdminToggle(true);
+      setIsAdmin(true);
       setIsPasswordModalOpen(false);
       setPasswordInput('');
     } else {
@@ -137,12 +154,30 @@ export default function App() {
   });
 
   const filteredComputers = useMemo(() => {
-    return computers.filter(pc => 
-      pc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      pc.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      pc.location.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [computers, searchTerm]);
+    return computers.filter(pc => {
+      const matchesSearch = pc.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                           pc.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                           pc.location.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === 'Todos' || pc.status === statusFilter;
+      const matchesTeam = teamFilter === 'Todos' || pc.currentTeam === teamFilter;
+      return matchesSearch && matchesStatus && matchesTeam;
+    });
+  }, [computers, searchTerm, statusFilter, teamFilter]);
+
+  const activeTeams = useMemo(() => {
+    const teams = new Set<string>();
+    computers.forEach(pc => {
+      if (pc.currentTeam) teams.add(pc.currentTeam);
+    });
+    return Array.from(teams).sort();
+  }, [computers]);
+
+  const filteredReservations = useMemo(() => {
+    return reservations.filter(res => {
+      const matchesStatus = reservationStatusFilter === 'Todos' || res.status === reservationStatusFilter;
+      return matchesStatus;
+    }).sort((a, b) => b.id.localeCompare(a.id)); // Sort by ID (descending) as a proxy for time if no timestamp
+  }, [reservations, reservationStatusFilter]);
 
   const stats = useMemo(() => {
     return {
@@ -152,6 +187,88 @@ export default function App() {
       maintenance: computers.filter(c => c.status === 'Manutenção').length,
     };
   }, [computers]);
+
+  const addNotification = (message: string, type: 'success' | 'info' | 'warning' = 'success') => {
+    const id = Date.now().toString();
+    setNotifications(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  };
+
+  // Low stock alert for admins
+  useEffect(() => {
+    if (isAdmin && stats.available < 20) {
+      addNotification(`Stock Crítico: Apenas ${stats.available} computadores disponíveis no Pólo.`, 'warning');
+    }
+  }, [isAdmin, stats.available < 20]);
+
+  // New pending reservation alert for admins
+  useEffect(() => {
+    const currentPendingCount = reservations.filter(r => r.status === 'Pendente').length;
+    if (isAdmin && currentPendingCount > lastPendingCount) {
+      addNotification(`Nova requisição pendente de aprovação!`, 'info');
+    }
+    setLastPendingCount(currentPendingCount);
+  }, [isAdmin, reservations.length]);
+
+  const handleExportCSV = () => {
+    if (filteredReservations.length === 0) {
+      addNotification('Não existem dados para exportar.', 'info');
+      return;
+    }
+
+    const headers = [
+      'ID Reserva',
+      'Remetida por',
+      'Email',
+      'Data Necessária',
+      'Espaço',
+      'Nº PCs',
+      'Equipa',
+      'Horário',
+      'Local Levantamento',
+      'Estado',
+      'Processado por',
+      'Motivo Rejeição',
+      'Devolvido a',
+      'Data Devolução'
+    ];
+
+    const csvRows = filteredReservations.map(res => [
+      res.id,
+      res.remetidaPor,
+      res.email,
+      res.dataNecessaria,
+      res.espacoTrabalho,
+      res.numComputadores,
+      res.equipa,
+      res.horarioUtilizacao,
+      res.pickupLocation || '',
+      res.status,
+      res.processedBy || '',
+      res.rejectionReason || '',
+      res.returnedBy || '',
+      res.returnedAt || ''
+    ]);
+
+    const csvContent = [
+      headers.join(','),
+      ...csvRows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `requisicoes_polo_sever_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    addNotification('Exportação concluída com sucesso!', 'success');
+  };
 
   const handleReserve = (e: React.FormEvent) => {
     e.preventDefault();
@@ -171,23 +288,13 @@ export default function App() {
       espacoTrabalho: formData.espacoTrabalho,
       equipa: formData.equipa,
       horarioUtilizacao: formData.horarioUtilizacao,
-      status: 'Ativa'
+      status: 'Pendente'
     };
 
-    // Mark 'n' computers as borrowed
-    let count = 0;
-    const updatedComputers = computers.map(pc => {
-      if (pc.status === 'Disponível' && count < qty) {
-        count++;
-        return { ...pc, status: 'Requisitado' as ComputerStatus };
-      }
-      return pc;
-    });
-
     setReservations([newReservation, ...reservations]);
-    setComputers(updatedComputers);
     
     setIsModalOpen(false);
+    addNotification(`Requisição enviada! Aguarde aprovação do administrador.`, 'info');
     setFormData({ 
       remetidaPor: '', 
       email: '', 
@@ -197,6 +304,65 @@ export default function App() {
       equipa: '', 
       horarioUtilizacao: '' 
     });
+  };
+
+  const handleAccept = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!acceptingResId) return;
+
+    const reservation = reservations.find(r => r.id === acceptingResId);
+    if (!reservation) return;
+
+    const qty = reservation.numComputadores;
+    if (qty > stats.available) {
+      alert('Não há computadores suficientes disponíveis para aprovar esta requisição.');
+      return;
+    }
+
+    // Update reservation
+    setReservations(prev => prev.map(r => 
+      r.id === acceptingResId ? { 
+        ...r, 
+        status: 'Ativa' as const,
+        pickupLocation: pickupLocationInput,
+        processedBy: currentAdmin.name
+      } : r
+    ));
+
+    // Mark computers as borrowed
+    let count = 0;
+    setComputers(prev => prev.map(pc => {
+      if (pc.status === 'Disponível' && count < qty) {
+        count++;
+        return { 
+          ...pc, 
+          status: 'Requisitado' as ComputerStatus,
+          currentTeam: reservation.equipa 
+        };
+      }
+      return pc;
+    }));
+
+    addNotification(`Requisição ${acceptingResId} aprovada!`, 'success');
+    setAcceptingResId(null);
+    setPickupLocationInput('');
+  };
+
+  const handleReject = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!rejectingResId) return;
+
+    setReservations(prev => prev.map(r => 
+      r.id === rejectingResId ? { 
+        ...r, 
+        status: 'Rejeitada' as const,
+        processedBy: currentAdmin.name,
+        rejectionReason: rejectionReasonInput
+      } : r
+    ));
+    addNotification(`Requisição ${rejectingResId} rejeitada.`, 'info');
+    setRejectingResId(null);
+    setRejectionReasonInput('');
   };
 
   const handleQrScan = (data: string) => {
@@ -237,19 +403,26 @@ export default function App() {
       r.id === reservationId ? { 
         ...r, 
         status: 'Concluída' as const,
-        returnedBy: currentAdmin.name 
+        returnedBy: currentAdmin.name,
+        returnedAt: new Date().toLocaleString('pt-PT')
       } : r
     ));
 
     // Mark 'n' computers as available
     let count = 0;
     setComputers(prev => prev.map(pc => {
-      if (pc.status === 'Requisitado' && count < qty) {
+      if (pc.status === 'Requisitado' && pc.currentTeam === reservation.equipa && count < qty) {
         count++;
-        return { ...pc, status: 'Disponível' as ComputerStatus };
+        return { 
+          ...pc, 
+          status: 'Disponível' as ComputerStatus,
+          currentTeam: undefined 
+        };
       }
       return pc;
     }));
+
+    addNotification(`${qty} computadores ficaram agora disponíveis!`, 'info');
   };
 
   const getStatusColor = (status: ComputerStatus) => {
@@ -372,23 +545,53 @@ export default function App() {
           <>
             {/* Stats Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-              <StatCard icon={<Laptop className="text-blue-600" />} label="Total" value={stats.total} color="blue" />
-              <StatCard icon={<CheckCircle2 className="text-emerald-600" />} label="Disponíveis" value={stats.available} color="emerald" />
-              <StatCard icon={<Clock className="text-amber-600" />} label="Requisitados" value={stats.borrowed} color="amber" />
-              <StatCard icon={<AlertCircle className="text-rose-600" />} label="Manutenção" value={stats.maintenance} color="rose" />
+              <div onClick={() => setStatusFilter('Todos')} className="cursor-pointer">
+                <StatCard icon={<Laptop className="text-blue-600" />} label="Total" value={stats.total} color="blue" active={statusFilter === 'Todos'} />
+              </div>
+              <div onClick={() => setStatusFilter('Disponível')} className="cursor-pointer">
+                <StatCard icon={<CheckCircle2 className="text-emerald-600" />} label="Disponíveis" value={stats.available} color="emerald" active={statusFilter === 'Disponível'} />
+              </div>
+              <div onClick={() => setStatusFilter('Requisitado')} className="cursor-pointer">
+                <StatCard icon={<Clock className="text-amber-600" />} label="Requisitados" value={stats.borrowed} color="amber" active={statusFilter === 'Requisitado'} />
+              </div>
+              <div onClick={() => setStatusFilter('Manutenção')} className="cursor-pointer">
+                <StatCard icon={<AlertCircle className="text-rose-600" />} label="Manutenção" value={stats.maintenance} color="rose" active={statusFilter === 'Manutenção'} />
+              </div>
             </div>
 
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
               <h3 className="text-lg font-bold text-slate-800">Lista de Equipamentos</h3>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  type="text" 
-                  placeholder="Filtrar por nome ou sala..."
-                  className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all w-full md:w-64 text-sm"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="relative flex-1 md:flex-none">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <input 
+                    type="text" 
+                    placeholder="Filtrar por nome ou sala..."
+                    className="pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all w-full md:w-64 text-sm"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                <select 
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value as any)}
+                  className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Todos">Todos os Estados</option>
+                  <option value="Disponível">Disponível</option>
+                  <option value="Requisitado">Requisitado</option>
+                  <option value="Manutenção">Manutenção</option>
+                </select>
+                <select 
+                  value={teamFilter}
+                  onChange={(e) => setTeamFilter(e.target.value)}
+                  className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Todos">Todas as Equipas</option>
+                  {activeTeams.map(team => (
+                    <option key={team} value={team}>{team}</option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -414,9 +617,17 @@ export default function App() {
                     <h3 className="text-lg font-bold text-slate-800 mb-1">{pc.name}</h3>
                     <p className="text-sm text-slate-500 mb-4">{pc.model}</p>
 
-                    <div className="flex items-center gap-2 text-slate-500 text-sm">
-                      <MapPin size={14} />
-                      {pc.location}
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-slate-500 text-sm">
+                        <MapPin size={14} />
+                        {pc.location}
+                      </div>
+                      {pc.currentTeam && (
+                        <div className="flex items-center gap-2 text-blue-600 text-xs font-bold bg-blue-50 px-2 py-1 rounded-lg w-fit">
+                          <Users size={12} />
+                          {pc.currentTeam}
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 ))}
@@ -426,100 +637,300 @@ export default function App() {
         )}
 
         {activeTab === 'reservations' && (
-          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[1000px]">
-                <thead>
-                  <tr className="bg-slate-50 border-bottom border-slate-200">
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">ID Reserva</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Remetida por</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Necessária para</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Espaço</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">PCs</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Equipa</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Horário</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600">Estado</th>
-                    <th className="px-6 py-4 text-sm font-semibold text-slate-600 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {reservations.length === 0 ? (
-                    <tr>
-                      <td colSpan={9} className="px-6 py-10 text-center text-slate-400">
-                        Nenhuma requisição registada.
-                      </td>
+          <div className="space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                  <History size={20} />
+                </div>
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">Gestão de Requisições</h2>
+                  <p className="text-xs text-slate-500">Visualize e processe todos os pedidos do Pólo.</p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-400 uppercase mr-2">Filtrar por:</span>
+                <select 
+                  value={reservationStatusFilter}
+                  onChange={(e) => setReservationStatusFilter(e.target.value as any)}
+                  className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Todos">Todos os Estados</option>
+                  <option value="Pendente">Pendente</option>
+                  <option value="Ativa">Ativa</option>
+                  <option value="Concluída">Concluída</option>
+                  <option value="Rejeitada">Rejeitada</option>
+                  <option value="Cancelada">Cancelada</option>
+                </select>
+
+                <button 
+                  onClick={handleExportCSV}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-blue-50 hover:text-blue-600 transition-all border border-slate-200"
+                  title="Exportar para CSV"
+                >
+                  <Download size={16} />
+                  <span className="hidden sm:inline">Exportar</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[1000px]">
+                  <thead>
+                    <tr className="bg-slate-50 border-bottom border-slate-200">
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">ID Reserva</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Remetida por</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Necessária para</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Espaço</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">PCs</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Equipa</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Horário / Levantamento</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600">Estado</th>
+                      <th className="px-6 py-4 text-sm font-semibold text-slate-600 text-right">Ações</th>
                     </tr>
-                  ) : (
-                    reservations.map((res) => (
-                      <tr key={res.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="font-mono text-xs text-slate-500">{res.id}</div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-col">
-                            <div className="flex items-center gap-2 text-slate-800 font-medium">
-                              <User size={14} />
-                              {res.remetidaPor}
-                            </div>
-                            <div className="text-[10px] text-slate-400 ml-5">{res.email}</div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2 text-slate-600 text-sm">
-                            <Calendar size={14} />
-                            {res.dataNecessaria}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-slate-600">{res.espacoTrabalho}</div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2 font-bold text-blue-600">
-                            <Laptop size={14} />
-                            {res.numComputadores}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-slate-600">{res.equipa}</div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="text-sm text-slate-600 font-medium">
-                            {res.horarioUtilizacao}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="flex flex-col gap-1">
-                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider w-fit ${
-                              res.status === 'Ativa' ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'
-                            }`}>
-                              {res.status}
-                            </span>
-                            {res.returnedBy && (
-                              <span className="text-[9px] text-emerald-600 font-medium flex items-center gap-1">
-                                <ShieldCheck size={10} />
-                                Por: {res.returnedBy}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          {isAdmin && res.status === 'Ativa' && (
-                            <button 
-                              onClick={() => handleReturn(res.id)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors text-xs font-bold"
-                            >
-                              <RotateCcw size={14} />
-                              Devolver
-                            </button>
-                          )}
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredReservations.length === 0 ? (
+                      <tr>
+                        <td colSpan={9} className="px-6 py-10 text-center text-slate-400">
+                          Nenhuma requisição encontrada com os filtros selecionados.
                         </td>
                       </tr>
-                    ))
+                    ) : (
+                      filteredReservations.map((res) => (
+                        <React.Fragment key={res.id}>
+                          <tr 
+                            onClick={() => setExpandedResId(expandedResId === res.id ? null : res.id)}
+                            className={`hover:bg-slate-50 transition-colors cursor-pointer ${expandedResId === res.id ? 'bg-blue-50/30' : ''}`}
+                          >
+                            <td className="px-6 py-4">
+                              <div className="font-mono text-xs text-slate-500">{res.id}</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col">
+                                <div className="flex items-center gap-2 text-slate-800 font-medium">
+                                  <User size={14} />
+                                  {res.remetidaPor}
+                                </div>
+                                <div className="text-[10px] text-slate-400 ml-5">{res.email}</div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2 text-slate-600 text-sm">
+                                <Calendar size={14} />
+                                {res.dataNecessaria}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="text-sm text-slate-600">{res.espacoTrabalho}</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2 font-bold text-blue-600">
+                                <Laptop size={14} />
+                                {res.numComputadores}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="text-sm text-slate-600">{res.equipa}</div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col gap-1">
+                                <div className="text-sm text-slate-600 font-medium">
+                                  {res.horarioUtilizacao}
+                                </div>
+                                {res.pickupLocation && (
+                                  <div className="text-[10px] text-blue-600 font-bold flex items-center gap-1">
+                                    <MapPin size={10} />
+                                    Levantamento: {res.pickupLocation}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex flex-col gap-1">
+                                <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider w-fit ${
+                                  res.status === 'Pendente' ? 'bg-amber-100 text-amber-700' :
+                                  res.status === 'Ativa' ? 'bg-blue-100 text-blue-700' :
+                                  res.status === 'Rejeitada' ? 'bg-rose-100 text-rose-700' :
+                                  'bg-slate-100 text-slate-500'
+                                }`}>
+                                  {res.status}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <div className="flex items-center justify-end gap-2" onClick={e => e.stopPropagation()}>
+                                {isAdmin && res.status === 'Pendente' && (
+                                  <>
+                                    <button 
+                                      onClick={() => setAcceptingResId(res.id)}
+                                      className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors"
+                                      title="Aceitar"
+                                    >
+                                      <ThumbsUp size={16} />
+                                    </button>
+                                    <button 
+                                      onClick={() => setRejectingResId(res.id)}
+                                      className="p-2 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors"
+                                      title="Rejeitar"
+                                    >
+                                      <ThumbsDown size={16} />
+                                    </button>
+                                  </>
+                                )}
+                                {isAdmin && res.status === 'Ativa' && (
+                                  <button 
+                                    onClick={() => handleReturn(res.id)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors text-xs font-bold"
+                                  >
+                                    <RotateCcw size={14} />
+                                    Devolver
+                                  </button>
+                                )}
+                                <button 
+                                  className={`p-2 rounded-lg transition-colors ${expandedResId === res.id ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                                  onClick={() => setExpandedResId(expandedResId === res.id ? null : res.id)}
+                                >
+                                  <Info size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                          
+                          {/* Expanded Details Row */}
+                          <AnimatePresence>
+                            {expandedResId === res.id && (
+                              <motion.tr
+                                initial={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="bg-slate-50/50"
+                              >
+                                <td colSpan={9} className="px-6 py-6">
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                    <div className="space-y-3">
+                                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Informação do Requisitante</h4>
+                                      <div className="space-y-2">
+                                        <div className="flex items-center gap-3 text-sm text-slate-600">
+                                          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                                            <User size={16} />
+                                          </div>
+                                          <div>
+                                            <p className="font-bold text-slate-800">{res.remetidaPor}</p>
+                                            <p className="text-xs text-slate-500">{res.email}</p>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-3 text-sm text-slate-600">
+                                          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                                            <Users size={16} />
+                                          </div>
+                                          <div>
+                                            <p className="font-bold text-slate-800">{res.equipa}</p>
+                                            <p className="text-xs text-slate-500">Equipa / Projeto</p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Detalhes da Utilização</h4>
+                                      <div className="space-y-2">
+                                        <div className="flex items-center gap-3 text-sm text-slate-600">
+                                          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                                            <MapPin size={16} />
+                                          </div>
+                                          <div>
+                                            <p className="font-bold text-slate-800">{res.espacoTrabalho}</p>
+                                            <p className="text-xs text-slate-500">Espaço de Trabalho</p>
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-3 text-sm text-slate-600">
+                                          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                                            <Clock size={16} />
+                                          </div>
+                                          <div>
+                                            <p className="font-bold text-slate-800">{res.horarioUtilizacao}</p>
+                                            <p className="text-xs text-slate-500">Horário Previsto</p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                      <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Estado e Logística</h4>
+                                      <div className="space-y-2">
+                                        <div className="flex items-center gap-3 text-sm text-slate-600">
+                                          <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center">
+                                            <Laptop size={16} />
+                                          </div>
+                                          <div>
+                                            <p className="font-bold text-slate-800">{res.numComputadores} Computadores</p>
+                                            <p className="text-xs text-slate-500">Quantidade Solicitada</p>
+                                          </div>
+                                        </div>
+                                        {res.pickupLocation && (
+                                          <div className="flex items-center gap-3 text-sm text-slate-600">
+                                            <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center">
+                                              <MapPin size={16} />
+                                            </div>
+                                            <div>
+                                              <p className="font-bold text-emerald-700">{res.pickupLocation}</p>
+                                              <p className="text-xs text-slate-500">Local de Levantamento</p>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Audit Trail */}
+                                  {(res.processedBy || res.rejectionReason || res.returnedBy) && (
+                                    <div className="mt-6 pt-6 border-t border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                      {res.processedBy && (
+                                        <div className="flex items-center gap-3 p-3 bg-white rounded-xl border border-slate-100">
+                                          <ShieldCheck size={18} className="text-blue-500" />
+                                          <div>
+                                            <p className="text-xs font-bold text-slate-700">
+                                              {res.status === 'Rejeitada' ? 'Rejeitado por:' : 'Aprovado por:'}
+                                            </p>
+                                            <p className="text-sm text-slate-600">{res.processedBy}</p>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {res.rejectionReason && (
+                                        <div className="flex items-center gap-3 p-3 bg-rose-50 rounded-xl border border-rose-100">
+                                          <AlertCircle size={18} className="text-rose-500" />
+                                          <div>
+                                            <p className="text-xs font-bold text-rose-700">Motivo da Rejeição:</p>
+                                            <p className="text-sm text-rose-600">{res.rejectionReason}</p>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {res.returnedBy && (
+                                        <div className="flex items-center gap-3 p-3 bg-emerald-50 rounded-xl border border-emerald-100">
+                                          <RotateCcw size={18} className="text-emerald-600" />
+                                          <div>
+                                            <p className="text-xs font-bold text-emerald-700">Devolução Processada por:</p>
+                                            <p className="text-sm text-emerald-600">{res.returnedBy} em {res.returnedAt}</p>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                              </motion.tr>
+                            )}
+                          </AnimatePresence>
+                        </React.Fragment>
+                      ))
                   )}
                 </tbody>
               </table>
             </div>
           </div>
+        </div>
         )}
         {activeTab === 'settings' && (
           <div className="max-w-2xl space-y-6">
@@ -534,12 +945,21 @@ export default function App() {
                     <p className="font-bold text-slate-700">Modo Administrador</p>
                     <p className="text-xs text-slate-500">Permite a devolução de equipamentos e gestão avançada.</p>
                   </div>
-                  <button 
-                    onClick={() => setIsAdmin(!isAdmin)}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${isAdmin ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600'}`}
-                  >
-                    {isAdmin ? 'Ativado' : 'Desativado'}
-                  </button>
+                  {showAdminToggle ? (
+                    <button 
+                      onClick={() => setIsAdmin(!isAdmin)}
+                      className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${isAdmin ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-600'}`}
+                    >
+                      {isAdmin ? 'Ativado' : 'Desativado'}
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => setIsPasswordModalOpen(true)}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-all"
+                    >
+                      Autenticar
+                    </button>
+                  )}
                 </div>
                 
                 <div className="p-4 bg-blue-50 rounded-xl border border-blue-100">
@@ -548,6 +968,52 @@ export default function App() {
                     Para ativar o menu de administrador, clique 5 vezes no logótipo "Pólo Sever" na barra lateral.
                   </p>
                 </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <History className="text-blue-600" size={20} />
+                Histórico de Devoluções
+              </h3>
+              <div className="space-y-4">
+                {reservations.filter(r => r.status === 'Concluída').length === 0 ? (
+                  <p className="text-sm text-slate-400 text-center py-4 italic">Nenhuma devolução registada.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="text-slate-500 font-semibold border-b border-slate-100">
+                        <tr>
+                          <th className="pb-2">Equipa / PCs</th>
+                          <th className="pb-2">Devolvido por</th>
+                          <th className="pb-2 text-right">Data/Hora</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {reservations
+                          .filter(r => r.status === 'Concluída')
+                          .sort((a, b) => new Date(b.returnedAt || '').getTime() - new Date(a.returnedAt || '').getTime())
+                          .map(res => (
+                            <tr key={res.id} className="group">
+                              <td className="py-3">
+                                <div className="font-bold text-slate-700">{res.equipa}</div>
+                                <div className="text-[10px] text-slate-400">{res.numComputadores} computadores</div>
+                              </td>
+                              <td className="py-3">
+                                <div className="flex items-center gap-2 text-slate-600">
+                                  <ShieldCheck size={14} className="text-emerald-500" />
+                                  {res.returnedBy}
+                                </div>
+                              </td>
+                              <td className="py-3 text-right">
+                                <div className="text-slate-500 text-xs">{res.returnedAt}</div>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -575,6 +1041,51 @@ export default function App() {
         )}
       </main>
 
+      {/* Notifications */}
+      <div className="fixed bottom-6 right-6 z-[100] flex flex-col gap-3 pointer-events-none">
+        <AnimatePresence>
+          {notifications.map(notification => (
+            <motion.div
+              key={notification.id}
+              initial={{ opacity: 0, x: 50, scale: 0.9 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+              className={`pointer-events-auto flex items-center gap-3 px-5 py-4 rounded-2xl shadow-xl border min-w-[300px] ${
+                notification.type === 'success' 
+                  ? 'bg-emerald-50 border-emerald-100 text-emerald-800' 
+                  : notification.type === 'warning'
+                  ? 'bg-rose-50 border-rose-100 text-rose-800'
+                  : 'bg-blue-50 border-blue-100 text-blue-800'
+              }`}
+            >
+              <div className={`p-2 rounded-xl ${
+                notification.type === 'success' ? 'bg-emerald-500 text-white' : 
+                notification.type === 'warning' ? 'bg-rose-500 text-white' : 
+                'bg-blue-500 text-white'
+              }`}>
+                {notification.type === 'success' ? <CheckCircle2 size={18} /> : 
+                 notification.type === 'warning' ? <AlertCircle size={18} /> : 
+                 <Bell size={18} />}
+              </div>
+              <div>
+                <p className="text-sm font-bold">
+                  {notification.type === 'success' ? 'Sucesso' : 
+                   notification.type === 'warning' ? 'Aviso' : 
+                   'Informação'}
+                </p>
+                <p className="text-xs opacity-90">{notification.message}</p>
+              </div>
+              <button 
+                onClick={() => setNotifications(prev => prev.filter(n => n.id !== notification.id))}
+                className="ml-auto text-slate-400 hover:text-slate-600"
+              >
+                <X size={16} />
+              </button>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+
       {/* QR Scanner Modal */}
       <AnimatePresence>
         {isQrScannerOpen && (
@@ -582,6 +1093,113 @@ export default function App() {
             onScan={handleQrScan} 
             onClose={() => setIsQrScannerOpen(false)} 
           />
+        )}
+      </AnimatePresence>
+
+      {/* Reject Reservation Modal */}
+      <AnimatePresence>
+        {rejectingResId && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setRejectingResId(null)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-white w-full max-w-sm rounded-3xl shadow-2xl p-6"
+            >
+              <h3 className="text-lg font-bold text-slate-800 mb-2">Rejeitar Requisição</h3>
+              <p className="text-sm text-slate-500 mb-6">Indique o motivo da rejeição para informar o utilizador.</p>
+              
+              <form onSubmit={handleReject} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-400 uppercase">Motivo da Rejeição</label>
+                  <textarea 
+                    autoFocus
+                    required
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none min-h-[100px] resize-none"
+                    placeholder="Ex: Equipamento indisponível, dados incompletos..."
+                    value={rejectionReasonInput}
+                    onChange={e => setRejectionReasonInput(e.target.value)}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    type="button"
+                    onClick={() => setRejectingResId(null)}
+                    className="flex-1 py-2.5 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    className="flex-1 bg-rose-500 text-white py-2.5 rounded-xl font-bold hover:bg-rose-600 transition-all shadow-lg shadow-rose-100"
+                  >
+                    Confirmar Rejeição
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Accept Reservation Modal */}
+      <AnimatePresence>
+        {acceptingResId && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setAcceptingResId(null)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative bg-white w-full max-w-sm rounded-3xl shadow-2xl p-6"
+            >
+              <h3 className="text-lg font-bold text-slate-800 mb-2">Aprovar Requisição</h3>
+              <p className="text-sm text-slate-500 mb-6">Indique onde os computadores deverão ser levantados.</p>
+              
+              <form onSubmit={handleAccept} className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-400 uppercase">Local de Levantamento</label>
+                  <input 
+                    autoFocus
+                    required
+                    type="text" 
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    placeholder="Ex: Secretaria, Sala de Professores..."
+                    value={pickupLocationInput}
+                    onChange={e => setPickupLocationInput(e.target.value)}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    type="button"
+                    onClick={() => setAcceptingResId(null)}
+                    className="flex-1 py-2.5 rounded-xl font-bold text-slate-500 hover:bg-slate-50 transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    type="submit"
+                    className="flex-1 bg-emerald-500 text-white py-2.5 rounded-xl font-bold hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-100"
+                  >
+                    Aprovar
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -666,13 +1284,37 @@ export default function App() {
                       required
                       type="number" 
                       min="1"
-                      max={stats.available}
-                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      className={`w-full px-4 py-2.5 rounded-xl border focus:ring-2 focus:outline-none transition-all ${
+                        formData.numComputadores > stats.available 
+                        ? 'border-rose-300 bg-rose-50 focus:ring-rose-500 text-rose-900' 
+                        : 'border-slate-200 focus:ring-blue-500'
+                      }`}
                       value={formData.numComputadores}
                       onChange={e => setFormData({...formData, numComputadores: parseInt(e.target.value) || 0})}
                     />
                   </div>
                 </div>
+
+                <AnimatePresence>
+                  {formData.numComputadores > stats.available && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-start gap-3">
+                        <AlertCircle className="text-rose-500 shrink-0 mt-0.5" size={18} />
+                        <div>
+                          <p className="text-sm font-bold text-rose-800">Stock Insuficiente</p>
+                          <p className="text-xs text-rose-600">
+                            Solicitou {formData.numComputadores} computadores, mas apenas temos {stats.available} disponíveis.
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-slate-700">Espaço de trabalho</label>
@@ -783,23 +1425,52 @@ export default function App() {
   );
 }
 
-function StatCard({ icon, label, value, color }: { icon: React.ReactNode, label: string, value: number, color: string }) {
+function StatCard({ icon, label, value, color, active = false }: { icon: React.ReactNode, label: string, value: number, color: string, active?: boolean }) {
   const colors: Record<string, string> = {
-    blue: 'bg-blue-50 border-blue-100',
-    emerald: 'bg-emerald-50 border-emerald-100',
-    amber: 'bg-amber-50 border-amber-100',
-    rose: 'bg-rose-50 border-rose-100',
+    blue: active ? 'bg-blue-600 border-blue-600 text-white' : 'bg-blue-50 border-blue-100 text-slate-800',
+    emerald: active ? 'bg-emerald-600 border-emerald-600 text-white' : 'bg-emerald-50 border-emerald-100 text-slate-800',
+    amber: active ? 'bg-amber-600 border-amber-600 text-white' : 'bg-amber-50 border-amber-100 text-slate-800',
+    rose: active ? 'bg-rose-600 border-rose-600 text-white' : 'bg-rose-50 border-rose-100 text-slate-800',
   };
 
   return (
-    <div className={`p-4 rounded-2xl border ${colors[color]} flex items-center gap-4`}>
-      <div className="p-3 bg-white rounded-xl shadow-sm">
+    <motion.div 
+      layout
+      className={`p-4 rounded-2xl border transition-all ${colors[color]} flex items-center gap-4 shadow-sm hover:shadow-md relative overflow-hidden`}
+    >
+      <div className={`p-3 rounded-xl shadow-sm z-10 ${active ? 'bg-white/20 text-white' : 'bg-white'}`}>
         {icon}
       </div>
-      <div>
-        <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">{label}</p>
-        <p className="text-2xl font-bold text-slate-800">{value}</p>
+      <div className="z-10">
+        <p className={`text-xs font-medium uppercase tracking-wider ${active ? 'text-white/80' : 'text-slate-500'}`}>{label}</p>
+        <AnimatePresence mode="wait">
+          <motion.p 
+            key={value}
+            initial={{ y: 10, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -10, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="text-2xl font-bold"
+          >
+            {value}
+          </motion.p>
+        </AnimatePresence>
       </div>
-    </div>
+      
+      {/* Pulse effect on value change */}
+      <motion.div
+        key={`pulse-${value}`}
+        initial={{ scale: 0, opacity: 0.5 }}
+        animate={{ scale: 4, opacity: 0 }}
+        transition={{ duration: 0.6 }}
+        className={`absolute inset-0 pointer-events-none rounded-full ${
+          active ? 'bg-white/20' : 
+          color === 'blue' ? 'bg-blue-400/20' : 
+          color === 'emerald' ? 'bg-emerald-400/20' : 
+          color === 'amber' ? 'bg-amber-400/20' : 
+          'bg-rose-400/20'
+        }`}
+      />
+    </motion.div>
   );
 }

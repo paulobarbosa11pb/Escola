@@ -6,6 +6,7 @@ export interface Computer {
   model: string;
   status: ComputerStatus;
   location: string;
+  currentTeam?: string;
 }
 
 export interface AdminUser {
@@ -23,6 +24,10 @@ export interface Reservation {
   numComputadores: number;
   equipa: string;
   horarioUtilizacao: string;
-  status: 'Ativa' | 'Concluída' | 'Cancelada';
+  status: 'Pendente' | 'Ativa' | 'Concluída' | 'Cancelada' | 'Rejeitada';
   returnedBy?: string;
+  returnedAt?: string;
+  processedBy?: string;
+  pickupLocation?: string;
+  rejectionReason?: string;
 }
