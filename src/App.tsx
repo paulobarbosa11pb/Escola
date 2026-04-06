@@ -46,10 +46,11 @@ import {
 } from 'firebase/firestore';
 import { 
   onAuthStateChanged, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
   signOut,
-  User as FirebaseUser
+  User as FirebaseUser,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updateProfile
 } from 'firebase/auth';
 import { 
   BarChart, 
@@ -323,6 +324,11 @@ function AppContent() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginName, setLoginName] = useState('');
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isAuthProcessing, setIsAuthProcessing] = useState(false);
   const [activeTab, setActiveTab] = useState<'inventory' | 'reservations' | 'dashboard' | 'settings'>('inventory');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
@@ -356,22 +362,48 @@ function AppContent() {
     return unsub;
   }, []);
 
-  const handleLogin = async () => {
-    const provider = new GoogleAuthProvider();
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!loginEmail.endsWith('@epa.edu.pt')) {
+      addNotification('Acesso restrito: utilize o seu email de trabalho @epa.edu.pt', 'warning');
+      return;
+    }
+
+    setIsAuthProcessing(true);
     try {
-      const result = await signInWithPopup(auth, provider);
-      const email = result.user.email;
-      
-      if (email && !email.endsWith('@epa.edu.pt')) {
-        await signOut(auth);
-        addNotification('Acesso restrito: utilize um email @epa.edu.pt', 'warning');
-        return;
+      if (isRegistering) {
+        if (!loginName.trim()) {
+          addNotification('Por favor, introduza o seu nome.', 'warning');
+          setIsAuthProcessing(false);
+          return;
+        }
+        const userCredential = await createUserWithEmailAndPassword(auth, loginEmail, loginPassword);
+        await updateProfile(userCredential.user, { displayName: loginName });
+        addNotification('Conta de trabalho criada com sucesso!', 'success');
+      } else {
+        await signInWithEmailAndPassword(auth, loginEmail, loginPassword);
+        addNotification('Login efetuado com sucesso!', 'success');
       }
-      
-      addNotification('Login efetuado com sucesso!', 'success');
-    } catch (error) {
-      console.error("Login failed", error);
-      addNotification('Falha ao efetuar login.', 'warning');
+      // Reset form
+      setLoginEmail('');
+      setLoginPassword('');
+      setLoginName('');
+    } catch (error: any) {
+      console.error("Auth failed", error);
+      let message = 'Falha na autenticação.';
+      if (error.code === 'auth/operation-not-allowed') {
+        message = 'O método de Email/Password não está ativado na Consola do Firebase. Por favor, ative-o em Authentication > Sign-in method.';
+      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        message = 'Email ou password incorretos.';
+      } else if (error.code === 'auth/email-already-in-use') {
+        message = 'Este email já está registado.';
+      } else if (error.code === 'auth/weak-password') {
+        message = 'A password deve ter pelo menos 6 caracteres.';
+      }
+      addNotification(message, 'warning');
+    } finally {
+      setIsAuthProcessing(false);
     }
   };
 
@@ -827,13 +859,10 @@ function AppContent() {
                 </div>
               </div>
             ) : (
-              <button 
-                onClick={handleLogin}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all shadow-sm"
-              >
-                <User size={16} className="text-blue-600" />
-                Entrar com Google
-              </button>
+              <div className="flex items-center justify-center gap-2 px-4 py-2.5 bg-slate-50 border border-slate-100 rounded-xl text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                <User size={14} className="text-slate-300" />
+                Acesso Restrito
+              </div>
             )}
           </div>
 
@@ -887,21 +916,76 @@ function AppContent() {
       {/* Main Content */}
       <main className="lg:ml-64 p-4 md:p-8 lg:p-10">
         {!user && !authLoading ? (
-          <div className="h-[70vh] flex flex-col items-center justify-center text-center max-w-md mx-auto">
-            <div className="bg-blue-50 p-6 rounded-full mb-6">
-              <ShieldAlert className="text-blue-600 w-12 h-12" />
+          <div className="min-h-[70vh] flex flex-col items-center justify-center max-w-md mx-auto py-10">
+            <div className="bg-white p-8 rounded-3xl shadow-xl w-full border border-slate-100">
+              <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+                <ShieldCheck className="text-blue-600" size={32} />
+              </div>
+              <h2 className="text-2xl font-bold text-slate-800 mb-2 text-center">Conta de Trabalho</h2>
+              <p className="text-slate-500 mb-8 text-center text-sm">
+                Utilize as suas credenciais da <strong>EPA Sever do Vouga</strong> para aceder ao sistema.
+              </p>
+              
+              <form onSubmit={handleEmailAuth} className="space-y-4 text-left">
+                {isRegistering && (
+                  <div className="space-y-1">
+                    <label className="text-xs font-bold text-slate-400 uppercase ml-1">Nome Completo</label>
+                    <input 
+                      required
+                      type="text"
+                      placeholder="Ex: João Silva"
+                      className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
+                      value={loginName}
+                      onChange={e => setLoginName(e.target.value)}
+                    />
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-400 uppercase ml-1">Email Institucional</label>
+                  <input 
+                    required
+                    type="email"
+                    placeholder="utilizador@epa.edu.pt"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
+                    value={loginEmail}
+                    onChange={e => setLoginEmail(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-400 uppercase ml-1">Password</label>
+                  <input 
+                    required
+                    type="password"
+                    placeholder="••••••••"
+                    className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all"
+                    value={loginPassword}
+                    onChange={e => setLoginPassword(e.target.value)}
+                  />
+                </div>
+                
+                <button 
+                  type="submit"
+                  disabled={isAuthProcessing}
+                  className="w-full bg-blue-600 text-white py-3.5 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center justify-center gap-2 disabled:opacity-70 mt-6"
+                >
+                  {isAuthProcessing ? (
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <User size={20} />
+                  )}
+                  {isRegistering ? 'Criar Conta de Trabalho' : 'Entrar no Sistema'}
+                </button>
+              </form>
+
+              <div className="mt-6 pt-6 border-t border-slate-100 text-center">
+                <button 
+                  onClick={() => setIsRegistering(!isRegistering)}
+                  className="text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                >
+                  {isRegistering ? 'Já tem conta? Iniciar Sessão' : 'Primeiro acesso? Criar conta de trabalho'}
+                </button>
+              </div>
             </div>
-            <h2 className="text-2xl font-bold text-slate-800 mb-3">Acesso Restrito</h2>
-            <p className="text-slate-500 mb-8">
-              Para visualizar o inventário e efetuar requisições no Pólo Sever, por favor inicie sessão com a sua conta institucional.
-            </p>
-            <button 
-              onClick={handleLogin}
-              className="px-8 py-3 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center gap-3"
-            >
-              <User size={20} />
-              Iniciar Sessão com Google
-            </button>
           </div>
         ) : authLoading ? (
           <div className="h-[70vh] flex items-center justify-center">
