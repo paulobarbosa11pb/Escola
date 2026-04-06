@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import * as React from 'react';
+import { useState, useMemo, useEffect, Component } from 'react';
 import { 
   Laptop, 
   Calendar, 
@@ -44,6 +45,13 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut,
+  User as FirebaseUser
+} from 'firebase/auth';
+import { 
   BarChart, 
   Bar, 
   XAxis, 
@@ -60,7 +68,57 @@ import {
 } from 'recharts';
 import { Computer, Reservation, ComputerStatus, AdminUser } from './types';
 import { initialComputers } from './mockData';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import { db, auth, handleFirestoreError, OperationType } from './firebase';
+
+// Error Boundary Component
+class ErrorBoundary extends (Component as any) {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: any, errorInfo: any) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      let message = "Ocorreu um erro inesperado.";
+      try {
+        const errObj = JSON.parse(this.state.error.message);
+        if (errObj.error === "Missing or insufficient permissions.") {
+          message = "Não tem permissões suficientes para aceder a estes dados. Por favor, faça login com uma conta autorizada.";
+        }
+      } catch (e) {
+        message = this.state.error.message || message;
+      }
+
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+          <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full text-center border border-rose-100">
+            <div className="bg-rose-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+              <AlertCircle className="text-rose-600" size={32} />
+            </div>
+            <h2 className="text-2xl font-bold text-slate-800 mb-2">Ups! Algo correu mal</h2>
+            <p className="text-slate-500 mb-8">{message}</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full bg-blue-600 text-white py-3 rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+            >
+              Recarregar Aplicação
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 // QR Scanner Component
 const QrScanner = ({ onScan, onClose }: { onScan: (data: string) => void, onClose: () => void }) => {
@@ -253,8 +311,18 @@ const Dashboard = ({ computers, reservations }: { computers: Computer[], reserva
 };
 
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
+  );
+}
+
+function AppContent() {
   const [computers, setComputers] = useState<Computer[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'inventory' | 'reservations' | 'dashboard' | 'settings'>('inventory');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQrScannerOpen, setIsQrScannerOpen] = useState(false);
@@ -279,8 +347,51 @@ export default function App() {
   const [editingComputerId, setEditingComputerId] = useState<string | null>(null);
   const ADMIN_PASSWORD = 'admin123'; // Password para o Easter Egg
 
+  // Auth State
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+    return unsub;
+  }, []);
+
+  const handleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try {
+      const result = await signInWithPopup(auth, provider);
+      const email = result.user.email;
+      
+      if (email && !email.endsWith('@epa.edu.pt')) {
+        await signOut(auth);
+        addNotification('Acesso restrito: utilize um email @epa.edu.pt', 'warning');
+        return;
+      }
+      
+      addNotification('Login efetuado com sucesso!', 'success');
+    } catch (error) {
+      console.error("Login failed", error);
+      addNotification('Falha ao efetuar login.', 'warning');
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      addNotification('Sessão terminada.', 'info');
+    } catch (error) {
+      console.error("Logout failed", error);
+    }
+  };
+
   // Firebase Sync
   useEffect(() => {
+    if (!user) {
+      setComputers([]);
+      setReservations([]);
+      return;
+    }
+
     const qComputers = query(collection(db, 'computers'));
     const unsubComputers = onSnapshot(qComputers, (snapshot) => {
       const docs = snapshot.docs.map(doc => doc.data() as Computer);
@@ -297,7 +408,7 @@ export default function App() {
       unsubComputers();
       unsubReservations();
     };
-  }, []);
+  }, [user]);
 
   const seedDatabase = async () => {
     if (isSeeding) return;
@@ -478,6 +589,11 @@ export default function App() {
     
     if (qty > stats.available) {
       alert(`Apenas ${stats.available} computadores disponíveis.`);
+      return;
+    }
+
+    if (!formData.email.toLowerCase().endsWith('@epa.edu.pt')) {
+      alert('O email deve pertencer ao domínio @epa.edu.pt');
       return;
     }
 
@@ -689,6 +805,38 @@ export default function App() {
         </div>
 
         <div className="pt-6 border-t border-slate-100 space-y-4">
+          <div className="px-4 py-2">
+            {authLoading ? (
+              <div className="h-10 bg-slate-100 animate-pulse rounded-xl" />
+            ) : user ? (
+              <div className="flex items-center gap-3 p-2 bg-slate-50 rounded-xl border border-slate-100">
+                <img 
+                  src={user.photoURL || `https://ui-avatars.com/api/?name=${user.displayName}`} 
+                  alt={user.displayName || 'User'} 
+                  className="w-8 h-8 rounded-full border border-white shadow-sm"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold text-slate-800 truncate">{user.displayName}</p>
+                  <button 
+                    onClick={handleLogout}
+                    className="text-[9px] text-rose-500 font-bold hover:underline"
+                  >
+                    Sair
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button 
+                onClick={handleLogin}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-all shadow-sm"
+              >
+                <User size={16} className="text-blue-600" />
+                Entrar com Google
+              </button>
+            )}
+          </div>
+
           {showAdminToggle && (
             <motion.div 
               initial={{ opacity: 0, y: 10 }}
@@ -738,7 +886,33 @@ export default function App() {
 
       {/* Main Content */}
       <main className="lg:ml-64 p-4 md:p-8 lg:p-10">
-        <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+        {!user && !authLoading ? (
+          <div className="h-[70vh] flex flex-col items-center justify-center text-center max-w-md mx-auto">
+            <div className="bg-blue-50 p-6 rounded-full mb-6">
+              <ShieldAlert className="text-blue-600 w-12 h-12" />
+            </div>
+            <h2 className="text-2xl font-bold text-slate-800 mb-3">Acesso Restrito</h2>
+            <p className="text-slate-500 mb-8">
+              Para visualizar o inventário e efetuar requisições no Pólo Sever, por favor inicie sessão com a sua conta institucional.
+            </p>
+            <button 
+              onClick={handleLogin}
+              className="px-8 py-3 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center gap-3"
+            >
+              <User size={20} />
+              Iniciar Sessão com Google
+            </button>
+          </div>
+        ) : authLoading ? (
+          <div className="h-[70vh] flex items-center justify-center">
+            <div className="flex flex-col items-center gap-4">
+              <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-slate-400 font-medium animate-pulse">A carregar sistema...</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
           <div>
             <h2 className="text-2xl font-bold text-slate-800">
               {activeTab === 'inventory' && 'Gestão de Inventário'}
@@ -1301,6 +1475,8 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+          </>
         )}
       </main>
 

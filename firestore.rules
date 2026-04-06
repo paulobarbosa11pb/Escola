@@ -42,7 +42,9 @@ service cloud.firestore {
     // ===============================================================
 
     function isAuthenticated() {
-      return request.auth != null;
+      return request.auth != null && 
+             request.auth.token.email_verified == true &&
+             request.auth.token.email.matches(".*@epa\\.edu\\.pt$");
     }
 
     function isAdmin() {
@@ -52,7 +54,7 @@ service cloud.firestore {
     }
 
     function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@epa\\.edu\\.pt$");
     }
 
     function hasOnlyAllowedFields(fields) {
@@ -91,14 +93,14 @@ service cloud.firestore {
     }
 
     match /computers/{computerId} {
-      allow read: if true; // Publicly readable inventory
+      allow read: if isAuthenticated();
       allow create: if isAdmin() && isValidComputer(request.resource.data);
       allow update: if isAdmin() && isValidComputer(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /reservations/{reservationId} {
-      allow read: if true; // Publicly readable for transparency, or restrict to owner/admin
+      allow read: if isAuthenticated();
       allow create: if isAuthenticated() && isValidReservation(request.resource.data) && request.resource.data.status == 'Pendente';
       allow update: if (isAdmin() && isValidReservation(request.resource.data)) || 
                       (isAuthenticated() && request.auth.token.email == resource.data.email && request.resource.data.status == 'Cancelada' && resource.data.status == 'Pendente');
